@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "jgarza.mounts",
+  "name": "Mounts",
+  "version": "1.0.0",
+  "author": "jgarza",
+  "license": "MIT",
+  "description": "Manage saved network mounts (SMB, SFTP/SSH, NFS): add connections, mount and unmount with one click, auto-mount at login, passwords kept in the keyring.",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Mounts.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Mounts",
+    "description": "Network drive icon with the number of mounted connections; click opens Mounts.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showCount": true,
+      "hideWhenEmpty": false,
+      "pollIntervalSec": 15
+    },
+    "schema": [
+      {
+        "key": "showCount",
+        "type": "boolean",
+        "label": "Show count",
+        "description": "Show how many connections are mounted next to the icon.",
+        "defaultValue": true
+      },
+      {
+        "key": "hideWhenEmpty",
+        "type": "boolean",
+        "label": "Hide when empty",
+        "description": "Hide the icon until you have saved a connection.",
+        "defaultValue": false
+      },
+      {
+        "key": "pollIntervalSec",
+        "type": "integer",
+        "label": "Refresh every (s)",
+        "description": "How often the mounted count is re-checked.",
+        "defaultValue": 15,
+        "min": 5,
+        "max": 300,
+        "step": 5
+      }
+    ]
+  },
+  "homepage": "https://github.com/jgarza9788/mounts",
+  "preview": "preview.png"
+}
