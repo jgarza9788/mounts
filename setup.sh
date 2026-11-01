@@ -15,11 +15,14 @@ deps=(
   "gio|gio|glib2|required|mount/unmount via GVfs (default backend)"
   "secret-tool|secret-tool|libsecret|required|passwords in the keyring"
   "ssh|ssh|openssh|required|SFTP through gio"
+  "python3|python3|python|required|menu entry and uninstall scripts"
   "gvfs SFTP|/usr/share/gvfs/mounts/sftp.mount|gvfs|required|SFTP backend of gio"
   "gvfs SMB|/usr/share/gvfs/mounts/smb.mount|gvfs-smb|optional|SMB shares"
   "gvfs NFS|/usr/share/gvfs/mounts/nfs.mount|gvfs-nfs|optional|NFS shares"
   "sshfs|sshfs|sshfs|optional|sshfs backend (FUSE) for SFTP"
   "fusermount3|fusermount3|fuse3|optional|unmounting sshfs"
+  "notify-send|notify-send|libnotify|optional|notification after mounting at login"
+  "fuser|fuser|psmisc|optional|naming what keeps a mount busy"
 )
 
 for d in "${deps[@]}"; do

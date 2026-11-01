@@ -14,11 +14,16 @@ keyring, never in a config file.
 - **Two ways to mount**, chosen per connection:
   - **gio** (default): GVfs, no root, the share also shows up in Nautilus and other GTK apps.
   - **sshfs** (SFTP only): a FUSE mount under `~/Mounts/<name>`, for tools that need a real path.
-- **One click**: Mount / Unmount, Open (in your file manager), plus Mount all and Unmount all.
+- **One click**: Mount / Unmount, Open (in your file manager), plus Mount all and Unmount all
+  (one login per host at a time, so a server doesn't block you for too many logins).
+- **Busy and dead mounts**: a failed unmount names what's using the folder and offers
+  **Force unmount**; a dead sshfs mount shows as Disconnected with a **Remount** button.
 - **Mount at login**: a per-connection switch that installs a systemd user service
-  and sends one notification saying what mounted or failed.
+  and sends one notification saying what mounted or failed. Unreachable hosts and a
+  locked keyring are retried for about 2 minutes; other hosts don't wait for them.
 - **Passwords in the keyring** (Secret Service, via `secret-tool`). The form can
   also remove a stored password.
+- **A log with fixes**: every failed mount/unmount is written to `~/.local/state/omarchy/jgarza.mounts/mounts.log` with the problem, what to do about it, and the raw tool output. The **Log** button opens it; a failed mount at login sends a notification pointing to it.
 - **Clear errors**: "authentication failed", "can't find that host", "connection
   refused"... instead of raw tool output. A banner warns when a tool you need is missing.
 - **Form checks** before saving, so you see what's wrong without trying.
@@ -50,9 +55,22 @@ cd ~/.config/omarchy/plugins/jgarza.mounts
 | SMB shares | `gvfs-smb` |
 | NFS exports | `gvfs-nfs` |
 | the sshfs backend (optional) | `sshfs`, `fuse3` |
+| the menu entry and uninstall scripts | `python` |
+| the login notification (optional) | `libnotify` |
+| naming what keeps a mount busy (optional) | `psmisc` |
 
 A prebuilt `bin/mountsctl` (x86_64) ships with the plugin. To rebuild it
 (needs Rust): `./build.sh`.
+
+## Where things get mounted
+
+| Backend | Location | Notes |
+|---|---|---|
+| **sshfs** | `~/Mounts/<id>` (the id is the connection name in lowercase, e.g. `MZ101` → `~/Mounts/mz101`) | A normal folder; every program can use it. |
+| **gio** | `/run/user/<uid>/gvfs/<scheme>:host=...` (e.g. `/run/user/1000/gvfs/sftp:host=nas`) | Managed by GVfs. Shows in Nautilus; some non-GTK programs and terminals can't use it comfortably, so pick sshfs (SFTP only) when you need a real path. |
+
+**Open** on a mounted connection takes you to the right place for either backend,
+and the form shows the location for the backend you've selected.
 
 ## Use
 
@@ -60,11 +78,17 @@ A prebuilt `bin/mountsctl` (x86_64) ships with the plugin. To rebuild it
 - Or run `omarchy-shell shell toggle jgarza.mounts`, and bind that to a key if you like.
 - Or add the **Mounts** widget to the bar and click it.
 
-Keys in the window: `n` new connection, `r` refresh, `esc` back / close.
+Keys in the window: `/` search, `n` new connection, `l` log, `r` refresh or reload,
+`q` close, `esc` back / close. With unsaved changes in the form, `esc` asks for a second press.
 
 ### SMB tip
-SMB shares need a saved password to mount from this window. Put the share name
-in **Share** (for example `media`), and an optional subfolder after it (`media/Movies`).
+SMB shares need a saved password to mount from this window, or turn on **Guest
+access**. **Domain or workgroup** is optional. Put the share name in **Share** (for
+example `media`), and an optional subfolder after it (`media/Movies`).
+
+### NFS tip
+NFS has no login, so the form hides User and Password. gvfs-nfs connects from an
+unprivileged port, so the export needs the `insecure` option in `/etc/exports`.
 
 ## Window rule (optional)
 
@@ -90,9 +114,10 @@ there. It only edits the block between the `jgarza.mounts` markers in
 
 ## Uninstall / clean up
 
-`./uninstall.sh` walks through six steps, warning and asking before each:
+`./uninstall.sh` walks through seven steps, warning and asking before each:
 unmount saved connections, remove the mount-at-login service, delete keyring
-passwords, delete the config (a backup copy is saved to `~/` first), remove empty
+passwords, delete the config (a backup copy is saved to `~/` first), delete the
+log and saved errors, remove empty
 `~/Mounts/<name>` folders, and remove the menu entry. Then it offers to delete build output.
 
 - `./uninstall.sh --dry-run` shows what would happen without changing anything.
@@ -110,11 +135,15 @@ The window and bar icon are QML. All real work (config, keyring, `gio` and
 ```sh
 bin/mountsctl list            # saved connections and whether each is mounted
 bin/mountsctl mount nas       # mount by id
-bin/mountsctl unmount nas
+bin/mountsctl unmount nas     # add --force to detach a busy mount
+bin/mountsctl remount nas     # reconnect a dead sshfs mount
+bin/mountsctl test < body.json  # try settings without saving (same JSON as save)
+bin/mountsctl log             # the log; `log clear` starts a new one
 bin/mountsctl deps            # which tools are installed
 ```
 
-Tests: `cd helper && cargo test`.
+Tests: `cd helper && cargo test`, then `tests/negative.sh`, which runs `bin/mountsctl`
+in a sandbox with fake tools (set `MOUNTSCTL_BIN` to test another build).
 
 After editing `Mounts.qml` the shell may keep the old copy; run `omarchy-restart-shell`.
 

@@ -14,7 +14,7 @@ file="${OMARCHY_MENU_EXT:-$HOME/.config/omarchy/extensions/omarchy-menu.jsonc}"
 start="// >>> jgarza.mounts >>>"
 end="// <<< jgarza.mounts <<<"
 
-exec python3 - "$1" "$file" "$start" "$end" <<'PY'
+exec python3 - "${1:-}" "$file" "$start" "$end" <<'PY'
 import sys, os, re, json, shutil, time
 
 cmd, path, start, end = sys.argv[1:5]
@@ -61,6 +61,11 @@ if cmd not in ("install", "remove"):
     print(__doc__ or "usage: menu.sh install|remove|status"); sys.exit(2)
 if not valid(text):
     print(f"refusing to edit: {path} is not valid JSONC right now"); sys.exit(1)
+
+if cmd == "install" and block in text:
+    print("menu entry already up to date"); sys.exit(0)
+if cmd == "remove" and not has:
+    print("menu entry not installed"); sys.exit(0)
 
 body = pat.sub("", text) if has else text
 if cmd == "install":

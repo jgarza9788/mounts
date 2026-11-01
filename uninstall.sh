@@ -18,6 +18,7 @@ mount_root="${MOUNTSCTL_MOUNT_ROOT:-$HOME/Mounts}"
 unit="jgarza-mounts-autostart.service"
 unit_file="$HOME/.config/systemd/user/$unit"
 service="jgarza.mounts"
+state_dir="${MOUNTSCTL_LOG_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/jgarza.mounts}"
 
 dry=0 yes=0 clean_only=0
 for a in "$@"; do
@@ -76,7 +77,7 @@ echo "Connections found: ${#ids[@]}${ids[*]:+ (${ids[*]})}"
 echo "This undoes what the plugin set up. Each step asks first. Packages are never removed."
 
 # ── 1. Unmount ──────────────────────────────────────────────────────────────
-step "1/6  Unmount saved connections"
+step "1/7  Unmount saved connections"
 echo "  Unmounts every saved connection that is currently mounted."
 warn "apps using these mounts (file manager, editors, running copies) will lose access;"
 echo "           an unmount can fail or interrupt a transfer in progress."
@@ -90,7 +91,7 @@ if ((${#ids[@]})) && [[ -x "$ctl" ]]; then
 else echo "  nothing to do (no connections, or bin/mountsctl not built)."; fi
 
 # ── 2. Autostart unit ───────────────────────────────────────────────────────
-step "2/6  Mount-at-login service"
+step "2/7  Mount-at-login service"
 echo "  Disables and deletes $unit_file"
 if [[ -f "$unit_file" ]]; then
   if ask "Remove the autostart service?"; then
@@ -102,7 +103,7 @@ if [[ -f "$unit_file" ]]; then
 else echo "  not installed."; fi
 
 # ── 3. Keyring passwords ────────────────────────────────────────────────────
-step "3/6  Saved passwords (keyring)"
+step "3/7  Saved passwords (keyring)"
 echo "  Deletes the passwords stored in your keyring for: ${ids[*]:-(none)}"
 warn "this cannot be undone. You will have to re-enter passwords if you reinstall."
 echo "  Only entries with service=$service are touched; other keyring items are left alone."
@@ -116,7 +117,7 @@ if ((${#ids[@]})); then
 else echo "  nothing to do."; fi
 
 # ── 4. Config ───────────────────────────────────────────────────────────────
-step "4/6  Saved connections (config)"
+step "4/7  Saved connections (config)"
 echo "  Deletes $cfg_dir (names, hosts, users, paths — no passwords)."
 warn "this cannot be undone."
 if [[ -d "$cfg_dir" ]]; then
@@ -131,8 +132,20 @@ if [[ -d "$cfg_dir" ]]; then
   else echo "  skipped."; fi
 else echo "  not present."; fi
 
-# ── 5. Mountpoints ──────────────────────────────────────────────────────────
-step "5/6  sshfs mountpoint folders"
+# ── 5. Log and state ────────────────────────────────────────────────────────
+step "5/7  Log and saved errors"
+echo "  Deletes mounts.log, mounts.log.old, last-errors.json and its lock from $state_dir"
+echo "  (they name your hosts and users). Other files there are left alone."
+if [[ -e "$state_dir/mounts.log" || -e "$state_dir/mounts.log.old" || -e "$state_dir/last-errors.json" ]]; then
+  if ask "Delete the log and saved errors?"; then
+    do_it rm -f "$state_dir/mounts.log" "$state_dir/mounts.log.old" "$state_dir/last-errors.json" "$state_dir/last-errors.lock"
+    do_it rmdir "$state_dir" 2>/dev/null
+    echo "  done."
+  else echo "  skipped."; fi
+else echo "  not present."; fi
+
+# ── 6. Mountpoints ──────────────────────────────────────────────────────────
+step "6/7  sshfs mountpoint folders"
 echo "  Removes EMPTY folders under $mount_root (rmdir only; never deletes files)."
 echo "  A folder that is still mounted or has content is left in place."
 if [[ -d "$mount_root" ]]; then
@@ -146,8 +159,8 @@ if [[ -d "$mount_root" ]]; then
   else echo "  skipped."; fi
 else echo "  not present."; fi
 
-# ── 6. Menu entry ───────────────────────────────────────────────────────────
-step "6/6  Omarchy menu entry"
+# ── 7. Menu entry ───────────────────────────────────────────────────────────
+step "7/7  Omarchy menu entry"
 echo "  Removes the \"Mounts\" entry (between the jgarza.mounts markers) from"
 echo "  ~/.config/omarchy/extensions/omarchy-menu.jsonc. A backup of that file is made first."
 if [[ "$("$here/menu.sh" status 2>/dev/null)" == installed ]]; then
