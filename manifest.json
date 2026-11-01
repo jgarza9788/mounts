@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "jgarza.mounts",
   "name": "Mounts",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "jgarza",
   "license": "MIT",
   "description": "Manage saved network mounts (SMB, SFTP/SSH, NFS): add connections, mount and unmount with one click, auto-mount at login, passwords kept in the keyring.",

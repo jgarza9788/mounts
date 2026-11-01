@@ -345,6 +345,9 @@ struct Out {
     timed_out: bool,
 }
 
+/// Most bytes kept per output stream; the rest is read and dropped.
+const MAX_CAPTURE: usize = 1 << 20;
+
 /// Run a command with optional stdin, killing it after `secs`.
 fn run(prog: &str, args: &[String], stdin: Option<&str>, secs: u64) -> Out {
     let mut cmd = Command::new(prog);
@@ -370,17 +373,32 @@ fn run_with(mut cmd: Command, prog: &str, stdin: Option<&str>, hold_stdin: bool,
     }
     // Drain stdout/stderr on threads. Reading after exit can block forever: sshfs
     // daemonizes and its ssh child keeps our pipes open for the life of the mount.
+    // Each stream is capped at MAX_CAPTURE bytes: a hostile server could otherwise stream
+    // unbounded output into memory before the timeout fires. Past the cap we keep reading
+    // and discard, so the child never blocks on a full pipe.
+    let truncated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (tx, rx) = std::sync::mpsc::channel::<(bool, Vec<u8>)>();
     for (is_out, pipe) in [(true, child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>)),
                            (false, child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>))] {
         let Some(mut pipe) = pipe else { continue };
         let tx = tx.clone();
+        let truncated = truncated.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
+            let mut sent = 0usize;
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => { let _ = tx.send((is_out, buf[..n].to_vec())); }
+                    Ok(n) => {
+                        let keep = n.min(MAX_CAPTURE - sent);
+                        if keep > 0 {
+                            sent += keep;
+                            let _ = tx.send((is_out, buf[..keep].to_vec()));
+                        }
+                        if keep < n {
+                            truncated.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                    }
                 }
             }
         });
@@ -414,7 +432,10 @@ fn run_with(mut cmd: Command, prog: &str, stdin: Option<&str>, hold_stdin: bool,
             Err(_) => break, // all readers done, or deadline passed
         }
     }
-    let text = String::from_utf8_lossy(&merged).trim().to_string();
+    let mut text = String::from_utf8_lossy(&merged).trim().to_string();
+    if truncated.load(std::sync::atomic::Ordering::Relaxed) {
+        text.push_str("\n[output truncated]");
+    }
     let stdout = String::from_utf8_lossy(&stdout).into_owned();
     let stderr = String::from_utf8_lossy(&stderr).into_owned();
     match status {
@@ -1682,5 +1703,16 @@ mod tests {
         assert!(u.contains("KillMode=process"));
         assert!(u.contains("RemainAfterExit=yes"));
         assert!(!u.contains("network-online"), "not available to user services");
+    }
+
+    #[test]
+    fn run_caps_output() {
+        let o = run("sh", &sv(&["-c", "yes"]), None, 2);
+        assert!(o.timed_out);
+        assert!(o.stdout.len() <= MAX_CAPTURE);
+        assert!(o.text.ends_with("[output truncated]") || o.timed_out);
+        let small = run("sh", &sv(&["-c", "echo hi"]), None, 5);
+        assert!(small.ok);
+        assert_eq!(small.text, "hi");
     }
 }
