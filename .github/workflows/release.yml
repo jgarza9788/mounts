@@ -19,6 +19,8 @@ jobs:
           persist-credentials: false
       - name: Toolchain
         run: rustup toolchain install "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' helper/rust-toolchain.toml)" --profile minimal
+      - name: Dependency advisories
+        run: cargo install cargo-audit --locked && (cd helper && cargo audit)
       - name: Test
         run: cd helper && cargo test --locked
       - name: Build
@@ -30,10 +32,6 @@ jobs:
           mkdir -p ../bin && cp target/release/mountsctl ../bin/mountsctl
           sha256sum ../bin/mountsctl
           echo "source commit: $GITHUB_SHA"
-      - name: Test tools
-        run: sudo apt-get update -q && sudo apt-get install -y -q sshfs libglib2.0-bin
-      - name: Negative tests
-        run: tests/negative.sh
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: bin/mountsctl

@@ -94,7 +94,13 @@ fn mountpoint(c: &Connection) -> PathBuf {
 
 fn load() -> Res<Config> {
     match fs::read_to_string(config_path()) {
-        Ok(s) => toml::from_str(&s).map_err(|e| format!("bad connections.toml: {e}")),
+        Ok(s) => {
+            let cfg: Config = toml::from_str(&s).map_err(|e| format!("bad connections.toml: {e}"))?;
+            if let Some(c) = cfg.connections.iter().find(|c| !valid_id(&c.id)) {
+                return Err(format!("bad connections.toml: invalid id '{}' for '{}' (use letters, digits, - and _)", c.id, c.name));
+            }
+            Ok(cfg)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
         Err(e) => Err(format!("cannot read connections.toml: {e}")),
     }
@@ -105,6 +111,32 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::create_dir_all(dir)?;
     fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+}
+
+/// A fresh private (0700) directory for short-lived files. It is created with a name that
+/// must not already exist, so nobody can pre-plant a symlink or swap files inside it.
+/// Prefers the per-user runtime dir; falls back to ~/.cache, never a shared /tmp.
+fn private_temp_dir(tag: &str) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    let base = match std::env::var("XDG_RUNTIME_DIR") {
+        Ok(d) if !d.is_empty() => PathBuf::from(d),
+        _ => {
+            let d = home().join(".cache");
+            private_dir(&d).or_else(|_| fs::create_dir_all(&d))?;
+            d
+        }
+    };
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let mut last = std::io::Error::other("no temp name");
+    for n in 0..16u32 {
+        let dir = base.join(format!("mountsctl-{tag}-{}-{nanos:x}{n}", std::process::id()));
+        match fs::DirBuilder::new().mode(0o700).create(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = e,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last)
 }
 
 /// Replace `path` in one step, so a reader never sees a half-written file.
@@ -161,6 +193,11 @@ fn unique_id(base: &str, taken: &[String]) -> String {
         .map(|n| format!("{base}-{n}"))
         .find(|c| !taken.contains(c))
         .unwrap()
+}
+
+/// Ids name a mount folder and keyring entry, so they must never hold a path separator or `..`.
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && !id.starts_with('.') && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn has_ctl(s: &str) -> bool {
@@ -831,9 +868,12 @@ fn do_test(c: &Connection, password: Option<&str>) -> Value {
         return json!({"ok": true, "message": format!("{} (it's mounted right now)", summary(n))});
     }
     if c.backend == "sshfs" {
-        let dir = std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
-        let mp = dir.join(format!("mountsctl-test-{}", std::process::id()));
-        return match sshfs_mount(c, &mp, password, "test") {
+        let tmp = match private_temp_dir("test") {
+            Ok(d) => d,
+            Err(e) => return failed(fail_full(c, "test", &format!("cannot create a private test folder: {e}"))),
+        };
+        let mp = tmp.join("mnt");
+        let result = match sshfs_mount(c, &mp, password, "test") {
             Ok(()) => {
                 let n = count(&mp);
                 if !fuse_detach(&mp, false) {
@@ -845,6 +885,8 @@ fn do_test(c: &Connection, password: Option<&str>) -> Value {
             }
             Err(e) => failed(e),
         };
+        let _ = fs::remove_dir(&tmp);
+        return result;
     }
     let o = gio_mount(c, password);
     if !o.ok && !o.text.contains("already mounted") {
@@ -880,11 +922,15 @@ fn explain_sshfs_reset(c: &Connection, raw: &str, password: Option<&str>) -> Str
     let mut args = sv(&["-o", "ConnectTimeout=10", "-o", "NumberOfPasswordPrompts=1", "-T"]);
     // Password: hand it to ssh through a throwaway SSH_ASKPASS helper (never on the command line).
     let askpass = password.and_then(|_| {
-        let dir = std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
-        let p = dir.join(format!("mountsctl-askpass-{}", std::process::id()));
-        use std::os::unix::fs::PermissionsExt;
-        fs::write(&p, "#!/bin/sh\nprintf '%s\\n' \"$MOUNTSCTL_PW\"\n").ok()?;
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o700)).ok()?;
+        use std::os::unix::fs::OpenOptionsExt;
+        let dir = private_temp_dir("askpass").ok()?;
+        let p = dir.join("askpass");
+        let written = fs::OpenOptions::new().create_new(true).write(true).mode(0o700).open(&p)
+            .and_then(|mut f| f.write_all(b"#!/bin/sh\nprintf '%s\\n' \"$MOUNTSCTL_PW\"\n"));
+        if written.is_err() {
+            let _ = fs::remove_dir(&dir);
+            return None;
+        }
         Some(p)
     });
     if askpass.is_none() {
@@ -907,6 +953,9 @@ fn explain_sshfs_reset(c: &Connection, raw: &str, password: Option<&str>) -> Str
     let o = run_with(cmd, "ssh", None, true, 20);
     if let Some(ap) = &askpass {
         let _ = fs::remove_file(ap);
+        if let Some(d) = ap.parent() {
+            let _ = fs::remove_dir(d);
+        }
     }
     if o.timed_out {
         // Logged in (or still trying) but our command never ran: something is waiting for input.
@@ -996,10 +1045,29 @@ fn systemd_enabled() -> bool {
     std::env::var("MOUNTSCTL_NO_SYSTEMD").is_err()
 }
 
+/// Quote a path for a systemd ExecStart line: spaces, quotes, backslashes and the
+/// `%` / `$` specifiers would otherwise be split or expanded.
+fn systemd_quote(s: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '%' => out.push_str("%%"),
+            '$' => out.push_str("$$"),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 fn unit_text(exe: &str) -> String {
     format!(
         "[Unit]\nDescription=Mount saved network shares (jgarza.mounts)\nAfter=graphical-session.target\n\n\
-         [Service]\nType=oneshot\nRemainAfterExit=yes\nKillMode=process\nExecStart={exe} autostart-run\n\n[Install]\nWantedBy=default.target\n"
+         [Service]\nType=oneshot\nRemainAfterExit=yes\nKillMode=process\nExecStart={} autostart-run\n\n[Install]\nWantedBy=default.target\n",
+        systemd_quote(exe)
     )
 }
 
@@ -1036,7 +1104,7 @@ fn mount_with_retries(c: &Connection) -> Res<()> {
     for secs in RETRY_DELAYS {
         // Only retry while the network may still be coming up. Retrying a bad
         // password or a refused session just gets this machine penalised/banned.
-        if !last.as_ref().err().is_some_and(|e| retryable(e)) {
+        if !last.as_ref().err().is_some_and(|e| retryable(e) && (e.starts_with("couldn't read") || !host_answers(c))) {
             break;
         }
         std::thread::sleep(Duration::from_secs(secs));
@@ -1092,10 +1160,34 @@ fn autostart_run(cfg: &Config) -> Value {
     json!({"ok": true, "results": results})
 }
 
+/// Does anything answer on the host's port right now? Retrying only makes sense while the
+/// network is still coming up. A host that does answer is not "unreachable", whatever its
+/// error text says, so a hostile server can't keep the retry loop going by printing
+/// "no route to host".
+fn host_answers(c: &Connection) -> bool {
+    use std::net::ToSocketAddrs;
+    let port = c.port.unwrap_or(match c.protocol.as_str() {
+        "smb" => 445,
+        "nfs" => 2049,
+        _ => 22,
+    });
+    let host = c.host.trim_matches(['[', ']']);
+    (host, port)
+        .to_socket_addrs()
+        .map(|mut it| it.any(|a| std::net::TcpStream::connect_timeout(&a, Duration::from_secs(3)).is_ok()))
+        .unwrap_or(false)
+}
+
 /// Is a mount error worth retrying at login (network not up yet), as opposed to
 /// one that will fail the same way again and count as another failed login?
 fn retryable(err: &str) -> bool {
     ["can't reach the host", "can't find that host", "couldn't read the stored password"].iter().any(|p| err.starts_with(p))
+}
+
+/// Notification daemons render a little markup (<b>, <a href>, <img>); error text comes
+/// from remote servers, so neutralise it.
+fn esc_markup(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 /// One desktop notification summarising a login auto-mount run.
@@ -1106,12 +1198,12 @@ fn notify_autostart(results: &[Value]) {
     let failed: Vec<String> = results
         .iter()
         .filter(|r| r["ok"] != json!(true))
-        .map(|r| format!("{}: {}", r["name"].as_str().or(r["id"].as_str()).unwrap_or("?"), r["error"].as_str().unwrap_or("failed")))
+        .map(|r| format!("{}: {}", esc_markup(r["name"].as_str().or(r["id"].as_str()).unwrap_or("?")), esc_markup(r["error"].as_str().unwrap_or("failed"))))
         .collect();
     let (urgency, body) = if failed.is_empty() {
         ("low", format!("{} mounted at login", results.len()))
     } else {
-        ("critical", format!("Could not mount at login:\n{}\n\nWhat to fix: open Mounts and click Log, or read\n{}", failed.join("\n"), log_path().display()))
+        ("critical", format!("Could not mount at login:\n{}\n\nWhat to fix: open Mounts and click Log, or read\n{}", failed.join("\n"), esc_markup(&log_path().display().to_string())))
     };
     let _ = run("notify-send", &sv(&["-a", "Mounts", "-u", urgency, "Mounts", &body]), None, 10);
 }
@@ -1387,6 +1479,35 @@ mod tests {
         let mut n = conn("nfs");
         n.user.clear();
         assert_eq!(uri(&n), "nfs://nas.local/media");
+    }
+
+    #[test]
+    fn id_check() {
+        assert!(valid_id("nas-2") && valid_id("my_nas"));
+        for bad in ["", ".", "..", "../x", "a/b", ".hidden", "a b"] {
+            assert!(!valid_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn markup_is_escaped() {
+        assert_eq!(esc_markup("<a href=\"x\">&</a>"), "&lt;a href=\"x\"&gt;&amp;&lt;/a&gt;");
+    }
+
+    #[test]
+    fn unit_path_is_quoted() {
+        assert!(unit_text("/home/a b/50%/mountsctl").contains("ExecStart=\"/home/a b/50%%/mountsctl\" autostart-run"));
+    }
+
+    #[test]
+    fn private_temp_dirs_are_private_and_unique() {
+        use std::os::unix::fs::PermissionsExt;
+        let a = private_temp_dir("t").unwrap();
+        let b = private_temp_dir("t").unwrap();
+        assert_ne!(a, b);
+        assert_eq!(fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o700);
+        let _ = fs::remove_dir(&a);
+        let _ = fs::remove_dir(&b);
     }
 
     #[test]
@@ -1698,7 +1819,7 @@ mod tests {
     #[test]
     fn unit_has_exe() {
         let u = unit_text("/x/mountsctl");
-        assert!(u.contains("ExecStart=/x/mountsctl autostart-run"));
+        assert!(u.contains("ExecStart=\"/x/mountsctl\" autostart-run"));
         // sshfs daemonizes inside the unit's cgroup; don't kill it when the oneshot exits.
         assert!(u.contains("KillMode=process"));
         assert!(u.contains("RemainAfterExit=yes"));
