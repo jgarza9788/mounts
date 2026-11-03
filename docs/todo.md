@@ -124,5 +124,5 @@ Bar and window (QML)
 - [x] 38. README: add the `/`, `l`, `q` keys, the `log` and `test` commands, and `tests/negative.sh`.
 - [x] 39. Add `python3` and `libnotify` to `setup.sh`.
 - [x] 40. Bump `manifest.json` to 1.1.0.
-- [ ] 41. **[provenance]** `bin/mountsctl` has no verifiable provenance. Added `.github/workflows/release.yml` (tag `v*` builds, tests and attests the binary) and `--locked` and a pinned toolchain in `build.sh`. Still open: push a tag, run `gh attestation verify`, then replace the committed binary with the CI-built one.
+- [x] 41. **[provenance]** `bin/mountsctl` has no verifiable provenance. Added `.github/workflows/release.yml` (tag `v*` builds, tests and attests the binary) and `--locked` and a pinned toolchain in `build.sh`. Done in v1.1.4: attested release asset verified and shipped as bin/mountsctl (see README).
 - [x] 42. Security scan fixes: private `O_EXCL` temp dirs for the askpass helper and the sshfs test mount (never shared `/tmp`); escape server text in login notifications; retry at login only while the host really doesn't answer; reject invalid ids in `connections.toml`; quote the systemd `ExecStart` path; `cargo audit` in the release workflow. `tests/negative.sh` is now a manual pre-tag check (the CI runner has no GVfs).

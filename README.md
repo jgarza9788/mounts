@@ -71,7 +71,21 @@ attestation that binds the source commit to the binary's SHA-256:
 gh attestation verify bin/mountsctl --repo jgarza9788/mounts
 ```
 
-Check that the attested commit is the one you checked out. A binary built locally with
+Check that the attested commit is the one you checked out.
+
+**Current shipped binary** (`bin/mountsctl`):
+
+| | |
+|---|---|
+| Release | [`v1.1.4`](https://github.com/jgarza9788/mounts/releases/tag/v1.1.4) |
+| Source commit | `91e021eccaac6271a42f1dd694e00877c2c04f3a` |
+| SHA-256 | `c00c887c74b001dc206daab2779148b1d0b03dd3f4748a78cea90dd46a21b4ed` |
+| Build | [GitHub Actions run](https://github.com/jgarza9788/mounts/actions/runs/41566875123), `release.yml` at `refs/tags/v1.1.4`, GitHub-hosted runner |
+
+`bin/mountsctl` is the release asset, byte for byte. The commit that adds it comes after
+the attested source commit and changes only that file and this note. Check with
+`sha256sum bin/mountsctl` and `gh attestation verify bin/mountsctl --repo jgarza9788/mounts`.
+Later releases replace this table. A binary built locally with
 `./build.sh` has no attestation; `sha256sum` it and compare with the release asset.
 
 ## Where things get mounted
