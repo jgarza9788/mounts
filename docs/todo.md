@@ -124,3 +124,4 @@ Bar and window (QML)
 - [x] 38. README: add the `/`, `l`, `q` keys, the `log` and `test` commands, and `tests/negative.sh`.
 - [x] 39. Add `python3` and `libnotify` to `setup.sh`.
 - [x] 40. Bump `manifest.json` to 1.1.0.
+- [ ] 41. **[provenance]** `bin/mountsctl` has no verifiable provenance. Added `.github/workflows/release.yml` (tag `v*` builds, tests and attests the binary) and `--locked` and a pinned toolchain in `build.sh`. Still open: push a tag, run `gh attestation verify`, then replace the committed binary with the CI-built one.

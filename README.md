@@ -62,6 +62,18 @@ cd ~/.config/omarchy/plugins/jgarza.mounts
 A prebuilt `bin/mountsctl` (x86_64) ships with the plugin. To rebuild it
 (needs Rust): `./build.sh`.
 
+### Verifying the prebuilt binary
+
+Binaries built by the `release` workflow (tags `v*`) carry a signed GitHub build
+attestation that binds the source commit to the binary's SHA-256:
+
+```
+gh attestation verify bin/mountsctl --repo jgarza9788/mounts
+```
+
+Check that the attested commit is the one you checked out. A binary built locally with
+`./build.sh` has no attestation; `sha256sum` it and compare with the release asset.
+
 ## Where things get mounted
 
 | Backend | Location | Notes |
