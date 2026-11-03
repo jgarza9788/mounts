@@ -83,7 +83,7 @@ Check that the attested commit is the one you checked out.
 | Build | [GitHub Actions run](https://github.com/jgarza9788/mounts/actions/runs/41566875123), `release.yml` at `refs/tags/v1.1.4`, GitHub-hosted runner |
 
 `bin/mountsctl` is the release asset, byte for byte. The commit that adds it comes after
-the attested source commit and changes only that file and this note. Check with
+the attested source commit and changes only that file, this note and `docs/todo.md`. Check with
 `sha256sum bin/mountsctl` and `gh attestation verify bin/mountsctl --repo jgarza9788/mounts`.
 Later releases replace this table. A binary built locally with
 `./build.sh` has no attestation; `sha256sum` it and compare with the release asset.
