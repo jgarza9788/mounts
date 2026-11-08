@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Io
+import qs.Commons
 import qs.Ui
 
 // Bar icon for jgarza.mounts: a network-drive glyph plus how many saved
@@ -45,10 +46,14 @@ BarWidget {
 
   Timer { interval: root.pollMs; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
 
-  BarIconButton {
+  // WidgetButton at the standard bar icon font, like jgarza.drives. BarIconButton
+  // draws inside an optical canvas that shrinks the glyph and count.
+  WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
+    fontSize: Style.bar.iconFont
+    horizontalMargin: 5
     text: "󰋊" + (root.showCount && root.total > 0 ? " " + root.mounted : "")
     active: root.failedNames.length > 0 || root.errorText !== ""
     dimmed: root.mounted === 0 && root.failedNames.length === 0
