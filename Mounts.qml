@@ -750,6 +750,7 @@ Item {
             spacing: Style.space(6)
             TextField {
               id: listSearch
+              maximumLength: 256
               Layout.fillWidth: true
               placeholderText: "Search name, host, user, path, state…  ( / )"
               text: root.listQuery
@@ -1007,6 +1008,7 @@ Item {
             spacing: Style.space(6)
             TextField {
               id: logSearch
+              maximumLength: 256
               Layout.fillWidth: true
               placeholderText: root.logRegex ? "Search the log (regex, e.g. MZ101.*(reset|denied))" : "Search the log  ( / )"
               text: root.logQuery
@@ -1097,6 +1099,7 @@ Item {
               Text { text: "Name"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
               TextField {
                 id: nameField
+                maximumLength: 64
                 Layout.fillWidth: true
                 placeholderText: "NAS"
                 text: root.form ? root.form.name : ""
@@ -1127,6 +1130,7 @@ Item {
                   Text { text: "Host"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
                   TextField {
                     id: hostField
+                    maximumLength: 253
                     Layout.fillWidth: true
                     placeholderText: "nas.local"
                     text: root.form ? root.form.host : ""
@@ -1140,6 +1144,7 @@ Item {
                   Text { text: "Port"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
                   TextField {
                     id: portField
+                    maximumLength: 5
                     Layout.fillWidth: true
                     placeholderText: "default"
                     inputMethodHints: Qt.ImhDigitsOnly
@@ -1162,6 +1167,7 @@ Item {
               Text { visible: !root.formNoLogin; text: "User"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
               TextField {
                 id: userField
+                maximumLength: 128
                 visible: !root.formNoLogin
                 Layout.fillWidth: true
                 placeholderText: "optional"
@@ -1173,6 +1179,7 @@ Item {
               Text { visible: domainField.visible; text: "Domain or workgroup"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
               TextField {
                 id: domainField
+                maximumLength: 128
                 visible: !!root.form && root.form.protocol === "smb" && !root.form.guest
                 Layout.fillWidth: true
                 placeholderText: "optional"
@@ -1187,6 +1194,7 @@ Item {
               }
               TextField {
                 id: pathField
+                maximumLength: 1024
                 Layout.fillWidth: true
                 placeholderText: root.form && root.form.protocol === "smb" ? "media" : "/home/you"
                 text: root.form ? root.form.path : ""
@@ -1202,6 +1210,7 @@ Item {
               }
               TextField {
                 id: passwordField
+                maximumLength: 256
                 visible: !root.formNoLogin
                 Layout.fillWidth: true
                 password: true

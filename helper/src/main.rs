@@ -14,6 +14,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::os::unix::process::CommandExt;
 use std::time::{Duration, Instant};
 
 const SERVICE: &str = "jgarza.mounts";
@@ -92,8 +93,17 @@ fn mountpoint(c: &Connection) -> PathBuf {
     mount_root().join(&c.id)
 }
 
+fn read_capped(path: &Path, max: u64) -> std::io::Result<String> {
+    let mut buf = Vec::new();
+    fs::File::open(path)?.take(max + 1).read_to_end(&mut buf)?;
+    if buf.len() as u64 > max {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("larger than {max} bytes")));
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
 fn load() -> Res<Config> {
-    match fs::read_to_string(config_path()) {
+    match read_capped(&config_path(), MAX_CONFIG) {
         Ok(s) => {
             let cfg: Config = toml::from_str(&s).map_err(|e| format!("bad connections.toml: {e}"))?;
             if let Some(c) = cfg.connections.iter().find(|c| !valid_id(&c.id)) {
@@ -208,6 +218,11 @@ fn has_ctl(s: &str) -> bool {
 fn validate(c: &Connection) -> Res<()> {
     if c.name.trim().is_empty() {
         return Err("name is required".into());
+    }
+    let too_long = |v: &str, n: usize| v.chars().count() > n;
+    if too_long(&c.name, 64) || too_long(&c.host, 253) || too_long(&c.user, 128)
+        || too_long(&c.domain, 128) || too_long(&c.path, 1024) {
+        return Err("a field is too long".into());
     }
     if !matches!(c.protocol.as_str(), "smb" | "sftp" | "nfs") {
         return Err("protocol must be smb, sftp or nfs".into());
@@ -384,6 +399,22 @@ struct Out {
 
 /// Most bytes kept per output stream; the rest is read and dropped.
 const MAX_CAPTURE: usize = 1 << 20;
+const MAX_CONFIG: u64 = 1 << 20;
+/// Directory listings are counted/scanned only this far: a huge or hostile share can't stall us.
+const MAX_ENTRIES: usize = 100_000;
+
+fn count_capped(dir: &Path) -> Option<usize> {
+    fs::read_dir(dir).ok().map(|rd| rd.take(MAX_ENTRIES).count())
+}
+
+/// SIGKILL a whole process group (the child led it, see `run_with`). Only used on timeout:
+/// after a normal exit, daemons such as sshfs must keep running.
+fn kill_group(pid: u32) {
+    let _ = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{pid}")])
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .status();
+}
 
 /// Run a command with optional stdin, killing it after `secs`.
 fn run(prog: &str, args: &[String], stdin: Option<&str>, secs: u64) -> Out {
@@ -399,7 +430,9 @@ fn run_with(mut cmd: Command, prog: &str, stdin: Option<&str>, hold_stdin: bool,
         .env_remove("LANGUAGE")
         .stdin(if stdin.is_some() || hold_stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // Own process group, so a timeout can take down the whole tree, not just the child.
+        .process_group(0);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return Out { ok: false, text: format!("cannot run {prog}: {e}"), stdout: String::new(), stderr: String::new(), timed_out: false },
@@ -446,6 +479,7 @@ fn run_with(mut cmd: Command, prog: &str, stdin: Option<&str>, hold_stdin: bool,
         match child.try_wait() {
             Ok(Some(s)) => break Some(s),
             Ok(None) if start.elapsed() > Duration::from_secs(secs) => {
+                kill_group(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 break None;
@@ -536,7 +570,7 @@ fn gvfs_dir() -> PathBuf {
 fn mounted_at(c: &Connection) -> Option<String> {
     if c.backend == "sshfs" {
         let mp = mountpoint(c);
-        let mounts = fs::read_to_string("/proc/self/mounts").unwrap_or_default();
+        let mounts = read_capped(Path::new("/proc/self/mounts"), 4 << 20).unwrap_or_default();
         return mounts
             .lines()
             .filter_map(|l| {
@@ -549,7 +583,7 @@ fn mounted_at(c: &Connection) -> Option<String> {
     }
     let dir = gvfs_dir();
     if let Ok(rd) = fs::read_dir(&dir) {
-        for e in rd.flatten() {
+        for e in rd.take(MAX_ENTRIES).flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             if gvfs_matches(c, &name) {
                 return Some(e.path().to_string_lossy().into_owned());
@@ -723,7 +757,7 @@ fn timestamp() -> String {
 /// Keep the log small: past ~200 KB drop everything but the last 1000 lines.
 fn trim_log(path: &std::path::Path) {
     if fs::metadata(path).map(|m| m.len() > 200_000).unwrap_or(false) {
-        if let Ok(s) = fs::read_to_string(path) {
+        if let Ok(s) = read_capped(path, 4 << 20) {
             let lines: Vec<&str> = s.lines().collect();
             let keep = lines[lines.len().saturating_sub(1000)..].join("\n");
             let _ = write_atomic(path, &(keep + "\n"));
@@ -855,10 +889,11 @@ fn do_test(c: &Connection, password: Option<&str>) -> Value {
     let summary = |n: Option<usize>| match n {
         Some(0) => "Connected — the folder is empty.".to_string(),
         Some(1) => "Connected — 1 item in the folder.".to_string(),
+        Some(n) if n >= MAX_ENTRIES => format!("Connected — {MAX_ENTRIES}+ items in the folder."),
         Some(n) => format!("Connected — {n} items in the folder."),
         None => "Connected.".to_string(),
     };
-    let count = |dir: &Path| fs::read_dir(dir).ok().map(|rd| rd.count());
+    let count = count_capped;
     let failed = |f: Failure| json!({"ok": false, "message": f.message, "problem": f.problem, "fix": f.fix});
     // sshfs: only the saved connection's own folder counts (id is blank when settings changed).
     // gio: GVfs keys mounts by server/share, so an identical mount is the same mount.
@@ -1098,10 +1133,16 @@ fn sync_unit(cfg: &Config) -> Res<()> {
 /// Seconds between login attempts, about 2 minutes in all. There's no network target
 /// to wait for in a user service, so retrying is what covers a slow network.
 const RETRY_DELAYS: [u64; 7] = [2, 4, 8, 16, 30, 30, 30];
+const RETRY_BUDGET: Duration = Duration::from_secs(300);
 
 fn mount_with_retries(c: &Connection) -> Res<()> {
+    let started = Instant::now();
     let mut last = do_mount(c);
     for secs in RETRY_DELAYS {
+        // Overall budget: the retries and their mounts never run past RETRY_BUDGET together.
+        if started.elapsed() + Duration::from_secs(secs) > RETRY_BUDGET {
+            break;
+        }
         // Only retry while the network may still be coming up. Retrying a bad
         // password or a refused session just gets this machine penalised/banned.
         if !last.as_ref().err().is_some_and(|e| retryable(e) && (e.starts_with("couldn't read") || !host_answers(c))) {
@@ -1824,6 +1865,28 @@ mod tests {
         assert!(u.contains("KillMode=process"));
         assert!(u.contains("RemainAfterExit=yes"));
         assert!(!u.contains("network-online"), "not available to user services");
+    }
+
+    #[test]
+    fn timeout_kills_the_whole_process_tree() {
+        let mark = format!("sleep {}", 4000 + std::process::id() % 1000);
+        let o = run("sh", &sv(&["-c", &format!("{mark} & {mark}; true")]), None, 1);
+        assert!(o.timed_out);
+        std::thread::sleep(Duration::from_millis(300));
+        let left = Command::new("pgrep").args(["-f", &mark]).output().unwrap();
+        assert!(left.stdout.is_empty(), "grandchild survived");
+    }
+
+    #[test]
+    fn listings_and_config_are_capped() {
+        let d = private_temp_dir("cap").unwrap();
+        for i in 0..5 { fs::write(d.join(i.to_string()), "").unwrap(); }
+        assert_eq!(count_capped(&d), Some(5));
+        let f = d.join("big");
+        fs::write(&f, vec![b'a'; 100]).unwrap();
+        assert!(read_capped(&f, 10).is_err());
+        assert!(read_capped(&f, 100).is_ok());
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
