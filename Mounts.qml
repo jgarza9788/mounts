@@ -748,7 +748,7 @@ Item {
             visible: root.listView && root.connections.length > 0
             Layout.fillWidth: true
             spacing: Style.space(6)
-            TextField {
+            SafeField {
               id: listSearch
               maximumLength: 256
               Layout.fillWidth: true
@@ -1006,7 +1006,7 @@ Item {
             visible: root.showLog
             Layout.fillWidth: true
             spacing: Style.space(6)
-            TextField {
+            SafeField {
               id: logSearch
               maximumLength: 256
               Layout.fillWidth: true
@@ -1097,7 +1097,7 @@ Item {
               spacing: Style.space(8)
 
               Text { text: "Name"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
-              TextField {
+              SafeField {
                 id: nameField
                 maximumLength: 64
                 Layout.fillWidth: true
@@ -1128,7 +1128,7 @@ Item {
                   Layout.fillWidth: true
                   spacing: Style.space(4)
                   Text { text: "Host"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
-                  TextField {
+                  SafeField {
                     id: hostField
                     maximumLength: 253
                     Layout.fillWidth: true
@@ -1142,7 +1142,7 @@ Item {
                   Layout.preferredWidth: Style.space(90)
                   spacing: Style.space(4)
                   Text { text: "Port"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
-                  TextField {
+                  SafeField {
                     id: portField
                     maximumLength: 5
                     Layout.fillWidth: true
@@ -1165,7 +1165,7 @@ Item {
               }
 
               Text { visible: !root.formNoLogin; text: "User"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
-              TextField {
+              SafeField {
                 id: userField
                 maximumLength: 128
                 visible: !root.formNoLogin
@@ -1177,7 +1177,7 @@ Item {
               }
 
               Text { visible: domainField.visible; text: "Domain or workgroup"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption }
-              TextField {
+              SafeField {
                 id: domainField
                 maximumLength: 128
                 visible: !!root.form && root.form.protocol === "smb" && !root.form.guest
@@ -1192,7 +1192,7 @@ Item {
                 text: root.form && root.form.protocol === "smb" ? "Share (and optional subfolder)" : "Remote path"
                 color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption
               }
-              TextField {
+              SafeField {
                 id: pathField
                 maximumLength: 1024
                 Layout.fillWidth: true
@@ -1208,7 +1208,7 @@ Item {
                 text: root.form && root.form.hasPassword ? (root.form.copyFrom ? "Password (copied from " + root.form.copyFromName + " — leave blank to keep)" : "Password (stored — leave blank to keep)") : "Password"
                 color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption
               }
-              TextField {
+              SafeField {
                 id: passwordField
                 maximumLength: 256
                 visible: !root.formNoLogin
